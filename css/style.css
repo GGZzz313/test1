@@ -1050,8 +1050,8 @@ html, body {
   transform: translateX(-50%);
   font-size: 12px;
   letter-spacing: 0.06em;
-  color: var(--ink-dim);
-  background: var(--glass);
+  color: var(--ink);
+  background: rgba(6, 9, 18, 0.9);
   border: 1px solid var(--glass-border);
   border-radius: 99px;
   padding: 8px 18px;
@@ -1066,6 +1066,28 @@ html, body {
 /* Upcoming events already behind the simulated clock */
 #events-list li.past { opacity: 0.35; filter: grayscale(0.6); }
 #events-list li.past .ev-date::after { content: " · past"; color: var(--ink-dim); }
+#events-list li.today .ev-date::after { content: " · today"; color: #86efac; }
+
+/* scrollable panel lists fade at the bottom instead of clipping mid-row */
+#events-list, #cad-list, #sentry-list, #legend-list {
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 12px), transparent);
+  padding-bottom: 30px;
+}
+
+/* legend taxonomy: populations above, display layers below */
+.legend-sep {
+  margin: 10px 2px 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(140, 165, 220, 0.14);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  cursor: default;
+  pointer-events: none;
+  list-style: none;
+}
 
 /* ============================================================
    Responsive — mobile
@@ -1078,7 +1100,7 @@ html, body {
   /* stats drop to their own full-width row so all three counts fit (no clipping) */
   .stats { width: 100%; order: 2; justify-content: space-between; gap: 12px; margin-left: 0; }
   .stat + .stat { padding-left: 12px; }
-  .stat-label { font-size: 8.5px; letter-spacing: 0.1em; }
+  .stat-label { font-size: 8px; letter-spacing: 0.08em; white-space: nowrap; }
   .hide-sm { display: none !important; }
 
   #panel-legend, #panel-cad, #panel-sentry, #panel-events {
@@ -1105,15 +1127,25 @@ html, body {
   body.sheet-open #hint { display: none; }
 
   #hud-bottom { flex-wrap: wrap; gap: 8px 14px; padding: 10px 12px calc(10px + var(--safe-b)); justify-content: center; }
-  .time-readout { width: 100%; justify-content: center; flex-wrap: wrap; }
-  #sim-date { min-width: 0; white-space: nowrap; font-size: 12px; }
+  .time-readout { width: 100%; justify-content: center; flex-wrap: nowrap; gap: 6px; }
+  #sim-date { min-width: 0; white-space: nowrap; font-size: 10.5px; }
+  #btn-now, #btn-share, #btn-tour { padding: 4px 9px; font-size: 9.5px; letter-spacing: 0.06em; }
   .time-stack { margin: 0; }
-  .speed-chips { overflow-x: auto; max-width: 56vw; scrollbar-width: none;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); }
+  .speed-chips { overflow-x: auto; max-width: calc(100vw - 156px); scrollbar-width: none; padding-right: 10px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
   .speed-chips::-webkit-scrollbar { display: none; }
 
   #fab-col { top: auto; bottom: calc(150px + var(--safe-b)); transform: none; z-index: 45; transition: transform 0.3s, opacity 0.3s; }   /* above open sheets so panels stay switchable */
-  #hint { bottom: calc(214px + var(--safe-b)); font-size: 11px; }   /* clear of the wrapped footer rows */
+  /* hint stays left of the FAB rail and clear of the wrapped footer rows */
+  #hint { bottom: calc(214px + var(--safe-b)); font-size: 11px; left: 12px; right: 68px; transform: none; text-align: center; white-space: normal; }
+  /* the scale bar sits above the hint band, clear of everything */
+  #scale-bar { bottom: calc(256px + var(--safe-b)); left: 14px; align-items: flex-start; }
+  body.sheet-open #scale-bar { display: none; }
+  #panel-info {
+    -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 26px), transparent);
+    mask-image: linear-gradient(180deg, #000 calc(100% - 26px), transparent);
+    padding-bottom: 18px;
+  }
 }
 
 @media (min-width: 861px) {

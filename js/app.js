@@ -582,6 +582,14 @@ function resize() {
   canvas.height = Math.round(cssH * dpr);
   gl.viewport(0, 0, canvas.width, canvas.height);
   mat4Perspective(proj, FOV, canvas.width / canvas.height, 0.01, 4000);
+  updateProjShift();
+}
+/* portrait: lift the projection centre so a framed target sits in the upper
+   half — deeper while the bottom sheet is open so the subject clears it */
+function updateProjShift() {
+  proj[9] = cssH > cssW * 1.15
+    ? (document.body.classList.contains("sheet-open") ? -0.44 : -0.26)
+    : 0;
 }
 window.addEventListener("resize", resize);
 resize();
@@ -831,6 +839,9 @@ buildPlanetOrbits();
 
 /* selected-orbit line (dynamic) — closed ellipse, or open hyperbola for ISOs */
 let selOrbitBuf = gl.createBuffer();
+const selDotBuf = gl.createBuffer();
+const selDotSizeBuf = makeBuffer(new Float32Array([0.06]));
+const selDotPos = new Float32Array(3);
 let selOrbitCount = 0;
 let selOrbitStrip = false;
 function buildSelectedOrbit(rec) {
@@ -1181,6 +1192,7 @@ function render(now) {
   // near plane follows zoom so a focused moon system isn't clipped away;
   // far plane covers the Oort shell and long-period comet orbits
   mat4Perspective(proj, FOV, canvas.width / canvas.height, Math.min(0.01, c.dist * 0.2), 300000);
+  updateProjShift();   // the per-frame rebuild must keep the portrait lift
   mat4LookAt(view, eye, c.target, [0, 0, 1]);
   mat4Mul(vp, proj, view);
   // star dome: same orientation, no translation — a sky at any zoom level
@@ -1201,7 +1213,7 @@ function render(now) {
       gl.bindBuffer(gl.ARRAY_BUFFER, ps.orbitBuf);
       gl.vertexAttribPointer(LN.aPos, 3, gl.FLOAT, false, 0, 0);
       gl.uniform3f(LN.uColor, ps.def.color[0], ps.def.color[1], ps.def.color[2]);
-      gl.uniform1f(LN.uAlpha, 0.14);
+      gl.uniform1f(LN.uAlpha, 0.2);   // orbits are architecture — they must read over the belt
       gl.drawArrays(gl.LINE_LOOP, 0, ps.orbitCount);
     }
   }
@@ -1241,19 +1253,21 @@ function render(now) {
   gl.uniform1f(PT.uTime, timeS);
   gl.uniform1f(PT.uCull, 0);          // default: never cull (true-scale blocks set it per-draw)
 
-  // stars (sizes are in px, not world units: fake it with min=max clamp window)
+  // stars (sizes are in px, not world units: fake it with min=max clamp window);
+  // parked at a planet they dim so moon/satellite markers own the frame
+  const starFade = state.focus ? 0.3 : 1;
   gl.uniform1f(PT.uMinPx, 0.6 * dpr);
-  gl.uniform1f(PT.uMaxPx, 3.4 * dpr);
-  gl.uniform1f(PT.uAlpha, 0.9);
+  gl.uniform1f(PT.uMaxPx, 2.8 * dpr);
+  gl.uniform1f(PT.uAlpha, 0.9 * starFade);
   gl.uniform3f(PT.uColor, 0.78, 0.85, 1.0);
   bindPointAttrs(starsCool.posBuf, starsCool.sizeBuf, starsCool.phaseBuf);
   gl.drawArrays(gl.POINTS, 0, starsCool.count);
   gl.uniform3f(PT.uColor, 0.62, 0.74, 0.98);
-  gl.uniform1f(PT.uAlpha, 0.55);
+  gl.uniform1f(PT.uAlpha, 0.55 * starFade);
   bindPointAttrs(starsBand.posBuf, starsBand.sizeBuf, starsBand.phaseBuf);
   gl.drawArrays(gl.POINTS, 0, starsBand.count);
   gl.uniform3f(PT.uColor, 1.0, 0.86, 0.66);
-  gl.uniform1f(PT.uAlpha, 0.8);
+  gl.uniform1f(PT.uAlpha, 0.8 * starFade);
   bindPointAttrs(starsWarm.posBuf, starsWarm.sizeBuf, starsWarm.phaseBuf);
   gl.drawArrays(gl.POINTS, 0, starsWarm.count);
   gl.uniformMatrix4fv(PT.uVP, false, vp);      // back to world space
@@ -1262,9 +1276,9 @@ function render(now) {
   const ts = state.trueScale;
   if (ts && !trueSizesBuilt) ensureTrueSizes();
 
-  // asteroids — recede politely while the camera is parked at a planet, so
-  // the focused world isn't buried in out-of-focus foreground confetti
-  const focusFade = state.focus ? 0.22 : 1;
+  // asteroids — recede politely while the camera is parked at a planet (or a
+  // small body is selected), so the subject isn't buried in confetti
+  const focusFade = state.focus ? 0.22 : state.selected ? 0.3 : 1;
   gl.uniform1f(PT.uMinPx, ts ? 0 : 1.25 * dpr);
   gl.uniform1f(PT.uMaxPx, ts ? 40 * dpr : (state.focus ? 3.5 : 9) * dpr);
   gl.uniform1f(PT.uCull, ts ? 1 : 0);   // true-scale: vanish unless zoomed onto a real body
@@ -1384,13 +1398,13 @@ function render(now) {
         gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false);
         gl.uniformMatrix4fv(PT.uVP, false, _planetVP);
       }
-      gl.uniform1f(PT.uMinPx, 0.9 * dpr);
-      gl.uniform1f(PT.uMaxPx, 3.5 * dpr);
+      gl.uniform1f(PT.uMinPx, 0.7 * dpr);
+      gl.uniform1f(PT.uMaxPx, 3 * dpr);
       bindPointAttrs(sats.posBuf, sats.sizeBuf, null, 0);
       const pc = sats.payloadCount;
       if (sats.visible && pc > 0) {
-        gl.uniform3f(PT.uColor, 0.85, 0.95, 1.0);
-        gl.uniform1f(PT.uAlpha, 0.5 * sf);   // dense LEO must not white out the globe
+        gl.uniform3f(PT.uColor, 0.55, 0.85, 1.0);   // cyan — reads as man-made vs the stars
+        gl.uniform1f(PT.uAlpha, 0.32 * sf);          // dense LEO must not white out the globe
         gl.drawArrays(gl.POINTS, 0, pc);
       }
       if (sats.debrisVisible && sats.count > pc) {
@@ -1403,6 +1417,28 @@ function render(now) {
         gl.uniformMatrix4fv(PT.uVP, false, vp);
       }
     }
+  }
+
+  // selection highlight: a bright dot over the chosen small body so the
+  // arrival reads instantly, even against the dimmed field
+  if (state.selected && !ts) {
+    const sg = groups[state.selected.group];
+    const sk = state.selected.index;
+    selDotPos[0] = sg.pos[sk * 3];
+    selDotPos[1] = sg.pos[sk * 3 + 1];
+    selDotPos[2] = sg.pos[sk * 3 + 2];
+    gl.bindBuffer(gl.ARRAY_BUFFER, selDotBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, selDotPos, gl.DYNAMIC_DRAW);
+    gl.uniform1f(PT.uMinPx, 5 * dpr);
+    gl.uniform1f(PT.uMaxPx, 12 * dpr);
+    gl.uniform1f(PT.uCull, 0);
+    gl.uniform3f(PT.uColor,
+      Math.min(sg.color[0] * 1.35 + 0.15, 1),
+      Math.min(sg.color[1] * 1.35 + 0.15, 1),
+      Math.min(sg.color[2] * 1.35 + 0.15, 1));
+    gl.uniform1f(PT.uAlpha, 1.0);
+    bindPointAttrs(selDotBuf, selDotSizeBuf, null, 0);
+    gl.drawArrays(gl.POINTS, 0, 1);
   }
 
   // sun core
@@ -1430,8 +1466,12 @@ function render(now) {
   }
 
   // comet tails (anti-sunward) — drawn last so they layer over everything
-  // (additive); parked at a planet they recede with the rest of the field
-  if (!state.focus && (groups[GI.COM].visible || groups[GI.LPC].visible)) drawCometTails();
+  // (additive); they stand down when the camera is parked at a planet or a
+  // non-comet is selected (a selected comet keeps its tail, of course)
+  const selGi = state.selected ? state.selected.group : -1;
+  const selIsComet = selGi === GI.COM || selGi === GI.LPC || (typeof GI.ISO !== "undefined" && selGi === GI.ISO);
+  if (!state.focus && (!state.selected || selIsComet) &&
+      (groups[GI.COM].visible || groups[GI.LPC].visible)) drawCometTails();
 
   updateOverlays(pixScale);
   updateHUD();
@@ -1530,7 +1570,8 @@ function updateOverlays(pixScale) {
   // fade out as the camera pulls past the planets — otherwise it just sits as an
   // unreadable smudge on the collapsed inner-system blob (like the planet labels do)
   const sunFade = clamp(1 - (state.cam.dist - 8) / 12, 0, 1);   // full ≤8 au, gone by ~20 au
-  const sshow = !state.selSun && sp && sunFade > 0.02 && sp[0] > -40 && sp[0] < cssW + 40 && sp[1] > -20 && sp[1] < cssH + 20 &&
+  const sshow = !state.selSun && sp && sunFade > 0.02 && sp[0] > 26 && sp[0] < cssW - 26 &&
+    sp[1] > (cssW <= 860 ? 300 : 70) && sp[1] < cssH - 60 &&
     rectFree(sp[0], sp[1], "Sun");
   sunLabelEl.style.opacity = sshow ? sunFade.toFixed(2) : "0";
   if (sshow) sunLabelEl.style.transform = `translate(${sp[0]}px, ${sp[1]}px) translate(-50%,-150%)`;
@@ -1548,8 +1589,9 @@ function updateOverlays(pixScale) {
     const px = (pixScale / dpr) * ps.def.size / p[2];
     // parked at a planet, background planet labels stand down
     const bgMuted = state.focus && !(state.focus.planet === i);
+    const topSafe = cssW <= 860 ? 300 : 70;   // fixed chrome (header/search) is a keep-out
     const show = state.showPlanets && state.selPlanet !== i && !bgMuted && px > 1.6 &&
-      p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20 &&
+      p[0] > 34 && p[0] < cssW - 34 && p[1] > topSafe && p[1] < cssH - 60 &&
       rectFree(p[0], p[1], ps.def.name);
     ps.labelEl.style.opacity = show ? "1" : "0";
     if (show) ps.labelEl.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
@@ -1569,7 +1611,7 @@ function updateOverlays(pixScale) {
     const isFocusTarget = state.focus && state.focus.small && state.focus.small[0] === d.gi && state.focus.small[1] === d.k;
     if (!g.visible || dwarfFade === 0 || isSel || (state.focus && !isFocusTarget)) { d.el.style.opacity = "0"; continue; }
     const p = project(g.pos[d.k * 3], g.pos[d.k * 3 + 1], g.pos[d.k * 3 + 2]);
-    const show = p && p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20 &&
+    const show = p && p[0] > 34 && p[0] < cssW - 34 && p[1] > (cssW <= 860 ? 300 : 70) && p[1] < cssH - 60 &&
       rectFree(p[0], p[1], d.name);
     d.el.style.opacity = show ? (0.85 * dwarfFade).toFixed(2) : "0";
     if (show) d.el.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
@@ -1591,7 +1633,7 @@ function updateOverlays(pixScale) {
       const pp = project(_mpp[0], _mpp[1], _mpp[2]);
       if (pp) sep = Math.hypot(p[0] - pp[0], p[1] - pp[1]);
     }
-    const show = sep > 30 && state.selMoon !== ml.k && p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20 &&
+    const show = sep > 30 && state.selMoon !== ml.k && p[0] > 30 && p[0] < cssW - 30 && p[1] > 70 && p[1] < cssH - 60 &&
       rectFree(p[0], p[1], ml.name);
     ml.el.style.opacity = show ? "0.85" : "0";
     if (show) ml.el.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
@@ -1606,7 +1648,7 @@ function updateOverlays(pixScale) {
     }
     if (!craftVisible || !c.inRange || (state.selCraft != null && craft[state.selCraft] === c)) { c.labelEl.style.opacity = "0"; continue; }
     const p = project(c.pos[0], c.pos[1], c.pos[2]);
-    const show = p && p[0] > -60 && p[0] < cssW + 60 && p[1] > -20 && p[1] < cssH + 20 &&
+    const show = p && p[0] > 40 && p[0] < cssW - 40 && p[1] > 70 && p[1] < cssH - 60 &&
       rectFree(p[0], p[1], c.name);
     c.labelEl.style.opacity = show ? "0.9" : "0";
     if (show) c.labelEl.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
@@ -1625,7 +1667,8 @@ function updateOverlays(pixScale) {
     let shown = false;
     if (fade > 0.01) {
       const p = project(rl.pos[0], rl.pos[1], rl.pos[2]);
-      if (p && p[0] > 40 && p[0] < cssW - 40 && p[1] > 30 && p[1] < cssH - 30) {
+      const halfW = rl.text.length * 4.6 + 14;   // labels never clip mid-word at the viewport edge
+      if (p && p[0] > halfW && p[0] < cssW - halfW && p[1] > 30 && p[1] < cssH - 30) {
         rl.el.style.opacity = (0.8 * fade).toFixed(2);
         rl.el.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
         shown = true;
@@ -1685,9 +1728,15 @@ function updateOverlays(pixScale) {
     }
     const p = project(selPos[0], selPos[1], selPos[2]);
     selMarkerEl.textContent = selName;
-    if (p) {
+    // zoomed out to system scale, a marker pinned on the collapsed inner
+    // system reads as mislabeling the barycenter — stand down
+    if (p && sp && state.cam.dist > 60 && Math.hypot(p[0] - sp[0], p[1] - sp[1]) < 16) {
+      selMarkerEl.style.opacity = "0";
+      selMarkerLastRect = null;
+    } else if (p) {
       selMarkerEl.style.opacity = "1";
-      selMarkerEl.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
+      // -100%: the ping ring at the element's foot lands ON the body, not above it
+      selMarkerEl.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-100%)`;
       const w = selName.length * 6.8 + 10;
       selMarkerLastRect = [p[0] - w / 2, p[1] - 26, p[0] + w / 2, p[1] - 4];
     } else { selMarkerEl.style.opacity = "0"; selMarkerLastRect = null; }
@@ -1795,8 +1844,11 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 let lastDateStr = "";
 function updateHUD() {
   if (state.shownCount !== state.totalLoaded) {
+    // count-up flourish only in the first seconds; after that the census is a
+    // fixed snapshot number and must not appear to drift
     const d = state.totalLoaded - state.shownCount;
-    state.shownCount += Math.abs(d) < 4 ? d : Math.round(d * 0.08);
+    const settled = launchT && performance.now() - launchT > 6000;
+    state.shownCount += settled || Math.abs(d) < 4 ? d : Math.round(d * 0.08);
     $("stat-count").textContent = state.shownCount.toLocaleString("en-US");
   }
   const date = new Date((state.simJD - 2440587.5) * 86400000);
@@ -2238,6 +2290,7 @@ function satFacts(k) {
 }
 
 let loadedOnce = false;
+let launchT = 0;
 async function loadAsteroids() {
   const fill = $("loader-fill");
   const status = $("loader-status");
@@ -2307,6 +2360,7 @@ function loaderReady() {
     loader.classList.add("done");
     setTimeout(loadSatellites, 5000);   // pre-warm the live-satellite layer for search & Earth
     document.body.classList.add("launched");
+    launchT = performance.now();
     if (skipDolly) {                 // arrived via a deep link — keep the restored view, no dive
       state.camEaseRate = 9;
       setTimeout(dismissHint, 6000);
@@ -2329,9 +2383,11 @@ function loaderReady() {
   window.addEventListener("keydown", onKey);
 }
 
-/* the mobile bottom sheet / FAB rail react to the info panel's visibility */
+/* the mobile bottom sheet / FAB rail / camera framing react to the info
+   panel's visibility */
 new MutationObserver(() => {
   document.body.classList.toggle("sheet-open", !$("panel-info").hidden);
+  updateProjShift();
 }).observe($("panel-info"), { attributes: true, attributeFilter: ["hidden"] });
 
 /* ---- close approaches (JPL CNEOS, from the snapshot) ---- */
@@ -2412,9 +2468,12 @@ function evCometPerihelia(now, end) {
       if (gi === GI.COM) { const period = TWO_PI / n; peri = tp + Math.ceil((now - tp) / period) * period; }
       if (peri < now - 1 || peri > end) continue;
       const m = g.meta[k], ggi = gi, kk = k;
-      // "238P/Read", not a bare "Read" that scans as a UI verb
-      const evName = m.pdes && !m.name.includes(String(m.pdes)) && /^\d+[PDI]/.test(String(m.pdes))
-        ? m.pdes + "/" + m.name : m.name;
+      // CNEOS-style comet designations: "238P/Read", or "P/2005 T3 (Read)"
+      // for provisional ids — never a bare "Read" that scans as a UI verb
+      const pd = String(m.pdes || "");
+      let evName = m.name;
+      if (/^\d+[PDI]/.test(pd) && !m.name.includes(pd)) evName = pd + "/" + m.name;
+      else if (pd && pd !== m.name) evName = (gi === GI.COM ? "P/" : "C/") + pd + " (" + m.name + ")";
       out.push({ jd: peri, kind: "com", label: evName + " — perihelion", sub: "q " + m.q.toFixed(2) + " au",
         act: () => { if (!groups[ggi].visible) { groups[ggi].visible = true; renderLegend(); } selectObject(ggi, kk); jumpToJD(peri); } });
     }
@@ -2482,7 +2541,9 @@ function renderEvents(snap) {
 setInterval(() => {
   const now = state.simJD;
   document.querySelectorAll("#events-list li[data-jd]").forEach((li) => {
-    li.classList.toggle("past", +li.dataset.jd < now - 0.5);
+    const jd = +li.dataset.jd;
+    li.classList.toggle("past", jd < now - 0.5);
+    li.classList.toggle("today", Math.abs(jd - now) <= 0.5);
   });
 }, 2500);
 
@@ -2613,7 +2674,11 @@ function renderLegend() {
     "A statistical representation, not data — no Oort-cloud object has ever been directly observed. Its existence and extent (≈2,000–100,000 au) are inferred from the orbits of long-period comets. Zoom all the way out to make the journey — and once you're past the shell, look around: there's a signpost to our nearest neighbouring star.",
     (li) => { OORT.visible = !OORT.visible; li.classList.toggle("off", !OORT.visible); }, OORT.visible));
 
-  // overlay toggles (not populations)
+  // overlay toggles (not populations) — visually separated so the taxonomy stays clean
+  const sep = document.createElement("li");
+  sep.className = "legend-sep";
+  sep.textContent = "display layers";
+  ul.appendChild(sep);
   const overlays = [
     { label: "True scale", always: true, css: "#7dd3fc", count: "—",
       desc: "Render every body at its real angular size instead of an exaggerated dot. The Sun and planets shrink to faint points; asteroids and moons vanish entirely — the honest emptiness of space. (They're still searchable and clickable.)",
@@ -2769,8 +2834,10 @@ function flyToSmallBody(g, k) {
   let dYaw = az - state.cam.tYaw;
   dYaw = ((dYaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
   state.cam.tYaw += dYaw;
-  state.cam.tPitch = clamp(0.42 + Math.atan2(z, Math.hypot(x, y)) * 0.5, -1.3, 1.3);
-  state.cam.tDist = clamp(r * 2.3, 0.6, MAX_DIST);
+  // shallow pitch keeps the object near screen centre (a steep tilt pushes a
+  // sun-centred frame's foreground object to the bottom edge / under sheets)
+  state.cam.tPitch = clamp(0.11 + Math.atan2(z, Math.hypot(x, y)) * 0.55, -1.3, 1.3);
+  state.cam.tDist = clamp(r * 2.6, 0.6, MAX_DIST);
   state.topDown = false;
   $("fab-view").classList.remove("on");
 }
@@ -2790,9 +2857,10 @@ function focusOn(f) {
     // shells) fills ~26% of the viewport; the moon system is a scroll away
     const rAU = (PLANET_FACTS[f.planet].d * 0.5) / AU_KM;
     state.cam.tDist = clamp(rAU * 14.8, 1e-4, 0.5);
-    // approach from sunward so the disc arrives lit, not as a night-side crescent
+    // approach from sunward (offset a touch, so a sliver of terminator gives
+    // the disc its three-dimensionality) — never a night-side crescent
     const pp = planetState[f.planet].pos;
-    const sunYaw = Math.atan2(-pp[1], -pp[0]);
+    const sunYaw = Math.atan2(-pp[1], -pp[0]) + 0.45;
     let dYaw = sunYaw - state.cam.tYaw;
     dYaw = ((dYaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
     state.cam.tYaw += dYaw;
@@ -3594,6 +3662,10 @@ window.addEventListener("keydown", (ev) => {
 const pointers = new Map();
 let dragDist = 0, pinchD0 = 0, distAtPinch = 0;
 function dismissHint() { $("hint").classList.add("gone"); }
+// touch devices get touch verbs
+if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) {
+  $("hint").textContent = "drag to orbit · pinch to zoom · tap an object";
+}
 
 canvas.addEventListener("pointerdown", (ev) => {
   if (tourActive) cancelTour();            // any scene interaction ends the tour
