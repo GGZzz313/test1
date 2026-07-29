@@ -1018,6 +1018,11 @@ html, body {
   flex-direction: column;
   gap: 4px;
   pointer-events: none;
+  transition: left 0.3s;
+}
+/* while the object card is open it owns the left edge — slide clear of it */
+@media (min-width: 861px) {
+  body.sheet-open #scale-bar { left: 336px; }
 }
 #scale-line {
   display: block;
@@ -1058,6 +1063,10 @@ html, body {
 }
 #hint.gone { opacity: 0; }
 
+/* Upcoming events already behind the simulated clock */
+#events-list li.past { opacity: 0.35; filter: grayscale(0.6); }
+#events-list li.past .ev-date::after { content: " · past"; color: var(--ink-dim); }
+
 /* ============================================================
    Responsive — mobile
    ============================================================ */
@@ -1086,8 +1095,14 @@ html, body {
   #panel-legend.open, #panel-cad.open, #panel-sentry.open, #panel-events.open { display: block; }
   #panel-cad.open, #panel-sentry.open, #panel-events.open { display: flex; }
 
-  #panel-info { left: 12px; right: 12px; width: auto; bottom: calc(150px + var(--safe-b)); }
+  /* the object card is a compact sheet, not a full-screen modal: the scene
+     stays visible above it and the time controls stay reachable below */
+  #panel-info { left: 12px; right: 12px; width: auto; bottom: calc(150px + var(--safe-b)); max-height: 38vh; }
+  #info-preview { height: 90px; }
   #info-grid { grid-template-columns: repeat(3, 1fr); }
+  .stat-num { font-size: 15px; }
+  body.sheet-open #fab-col { transform: translateX(74px); opacity: 0; pointer-events: none; }
+  body.sheet-open #hint { display: none; }
 
   #hud-bottom { flex-wrap: wrap; gap: 8px 14px; padding: 10px 12px calc(10px + var(--safe-b)); justify-content: center; }
   .time-readout { width: 100%; justify-content: center; flex-wrap: wrap; }
@@ -1097,8 +1112,8 @@ html, body {
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); }
   .speed-chips::-webkit-scrollbar { display: none; }
 
-  #fab-col { top: auto; bottom: calc(150px + var(--safe-b)); transform: none; z-index: 45; }   /* above open sheets so panels stay switchable */
-  #hint { bottom: calc(118px + var(--safe-b)); font-size: 11px; }
+  #fab-col { top: auto; bottom: calc(150px + var(--safe-b)); transform: none; z-index: 45; transition: transform 0.3s, opacity 0.3s; }   /* above open sheets so panels stay switchable */
+  #hint { bottom: calc(214px + var(--safe-b)); font-size: 11px; }   /* clear of the wrapped footer rows */
 }
 
 @media (min-width: 861px) {

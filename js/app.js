@@ -290,7 +290,8 @@ const labelsEl = $("labels");
 const state = {
   simJD: jdNow(),
   playing: true,
-  dps: 30,                 // simulated days per real second
+  dps: 1 / 86400,          // open at the real present, ticking at REAL rate;
+                           // faster rates are a user choice (chips below)
   dir: 1,
   cam: {
     yaw: -1.1, pitch: 0.55, dist: 7.8, tYaw: -1.1, tPitch: 0.55, tDist: 7.8,
@@ -354,8 +355,8 @@ const EARTH_IDX = 2;             // planetState index of Earth
 const OBLIQ = 23.4392911 * DEG;  // ecliptic obliquity (equatorial → ecliptic)
 const AU_KM = 149597870.7;
 const sats = {
-  loaded: false, loading: false, visible: false,   // off by default — toggle on at Earth
-  debrisVisible: false,          // tracked debris, separate toggle + colour, also off
+  loaded: false, loading: false, visible: true,    // payloads show on arrival at Earth — the marquee moment
+  debrisVisible: false,          // tracked debris, separate toggle + colour, off by default
   payloadCount: 0,               // split index: [0,payloadCount)=payloads, [payloadCount,count)=debris
   count: 0, recs: [], names: [],
   pos: new Float32Array(0), rel: new Float32Array(0), sizes: new Float32Array(0),
@@ -1261,9 +1262,11 @@ function render(now) {
   const ts = state.trueScale;
   if (ts && !trueSizesBuilt) ensureTrueSizes();
 
-  // asteroids
+  // asteroids — recede politely while the camera is parked at a planet, so
+  // the focused world isn't buried in out-of-focus foreground confetti
+  const focusFade = state.focus ? 0.22 : 1;
   gl.uniform1f(PT.uMinPx, ts ? 0 : 1.25 * dpr);
-  gl.uniform1f(PT.uMaxPx, ts ? 40 * dpr : 9 * dpr);
+  gl.uniform1f(PT.uMaxPx, ts ? 40 * dpr : (state.focus ? 3.5 : 9) * dpr);
   gl.uniform1f(PT.uCull, ts ? 1 : 0);   // true-scale: vanish unless zoomed onto a real body
   for (const g of groups) {
     if (!g.count || !g.visible) continue;
@@ -1273,7 +1276,7 @@ function render(now) {
       g.dirty = false;
     }
     gl.uniform3f(PT.uColor, g.color[0], g.color[1], g.color[2]);
-    gl.uniform1f(PT.uAlpha, 0.85);
+    gl.uniform1f(PT.uAlpha, 0.85 * focusFade);
     bindPointAttrs(g.posBuf, ts ? g.trueSizeBuf : g.sizeBuf, null, 0);
     gl.drawArrays(gl.POINTS, 0, g.count);
   }
@@ -1329,33 +1332,6 @@ function render(now) {
     gl.drawArrays(gl.POINTS, 0, moons.count);
   }
 
-  // satellites + debris (Earth's artificial moons) — only in the Earth-focus view.
-  // One buffer, two contiguous ranges drawn in two colours: payloads, then debris.
-  if (sats.loaded && (sats.visible || sats.debrisVisible) && earthFocused) {
-    const sf = satEpochFade();
-    if (sf > 0.01) {
-      if (sats.dirty) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, sats.posBuf);
-        gl.bufferData(gl.ARRAY_BUFFER, sats.pos, gl.DYNAMIC_DRAW);
-        sats.dirty = false;
-      }
-      gl.uniform1f(PT.uMinPx, 1.3 * dpr);
-      gl.uniform1f(PT.uMaxPx, 5 * dpr);
-      bindPointAttrs(sats.posBuf, sats.sizeBuf, null, 0);
-      const pc = sats.payloadCount;
-      if (sats.visible && pc > 0) {
-        gl.uniform3f(PT.uColor, 0.85, 0.95, 1.0);
-        gl.uniform1f(PT.uAlpha, 0.85 * sf);
-        gl.drawArrays(gl.POINTS, 0, pc);
-      }
-      if (sats.debrisVisible && sats.count > pc) {
-        gl.uniform3f(PT.uColor, 1.0, 0.47, 0.29);   // debris — orange
-        gl.uniform1f(PT.uAlpha, 0.8 * sf);
-        gl.drawArrays(gl.POINTS, pc, sats.count - pc);
-      }
-    }
-  }
-
   // focused planet → a lit sphere fades in over the sprite as you approach
   const fpi = (state.focus && state.focus.planet != null) ? state.focus.planet : -1;
   let sphereA = 0;
@@ -1364,11 +1340,23 @@ function render(now) {
     sphereA = smoothstep(2, 6, pixScale * rAU / Math.max(state.cam.dist, 1e-6));
   }
 
-  // planets
+  // planets — a soft halo pass first so the eight anchors read above the
+  // 50k-point cloud at overview zoom, then the bright core sprite
   if (state.showPlanets) {
-    gl.uniform1f(PT.uMinPx, ts ? 1.5 * dpr : 2.5 * dpr);   // keep planets as faint points in true-scale
-    gl.uniform1f(PT.uMaxPx, ts ? 200 * dpr : 26 * dpr);
     gl.uniform1f(PT.uCull, 0);
+    if (!ts) {
+      gl.uniform1f(PT.uMinPx, 7 * dpr);
+      gl.uniform1f(PT.uMaxPx, 40 * dpr);
+      for (let i = 0; i < planetState.length; i++) {
+        const ps = planetState[i];
+        gl.uniform3f(PT.uColor, ps.def.color[0], ps.def.color[1], ps.def.color[2]);
+        gl.uniform1f(PT.uAlpha, 0.22 * (i === fpi ? 1 - sphereA : 1.0));
+        bindPointAttrs(ps.posBuf, ps.sizeBuf, null, 0);
+        gl.drawArrays(gl.POINTS, 0, 1);
+      }
+    }
+    gl.uniform1f(PT.uMinPx, ts ? 1.5 * dpr : 3.6 * dpr);   // keep planets as faint points in true-scale
+    gl.uniform1f(PT.uMaxPx, ts ? 200 * dpr : 26 * dpr);
     for (let i = 0; i < planetState.length; i++) {
       const ps = planetState[i];
       gl.uniform3f(PT.uColor, ps.def.color[0], ps.def.color[1], ps.def.color[2]);
@@ -1378,6 +1366,44 @@ function render(now) {
     }
   }
   if (fpi >= 0 && sphereA > 0.004) drawFocusedPlanet(fpi, sphereA);
+
+  // satellites + debris (Earth's artificial moons) — only in the Earth-focus
+  // view, drawn AFTER the globe so the swarm reads against it; when the lit
+  // sphere is up we reuse its depth buffer (and its projection, so depths
+  // compare correctly) to occlude satellites passing behind the planet.
+  if (sats.loaded && (sats.visible || sats.debrisVisible) && earthFocused) {
+    const sf = satEpochFade();
+    if (sf > 0.01) {
+      if (sats.dirty) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, sats.posBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, sats.pos, gl.DYNAMIC_DRAW);
+        sats.dirty = false;
+      }
+      const occlude = fpi === EARTH_IDX && sphereA > 0.004;
+      if (occlude) {
+        gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.depthMask(false);
+        gl.uniformMatrix4fv(PT.uVP, false, _planetVP);
+      }
+      gl.uniform1f(PT.uMinPx, 0.9 * dpr);
+      gl.uniform1f(PT.uMaxPx, 3.5 * dpr);
+      bindPointAttrs(sats.posBuf, sats.sizeBuf, null, 0);
+      const pc = sats.payloadCount;
+      if (sats.visible && pc > 0) {
+        gl.uniform3f(PT.uColor, 0.85, 0.95, 1.0);
+        gl.uniform1f(PT.uAlpha, 0.5 * sf);   // dense LEO must not white out the globe
+        gl.drawArrays(gl.POINTS, 0, pc);
+      }
+      if (sats.debrisVisible && sats.count > pc) {
+        gl.uniform3f(PT.uColor, 1.0, 0.47, 0.29);   // debris — orange
+        gl.uniform1f(PT.uAlpha, 0.55 * sf);
+        gl.drawArrays(gl.POINTS, pc, sats.count - pc);
+      }
+      if (occlude) {
+        gl.disable(gl.DEPTH_TEST); gl.depthMask(true);
+        gl.uniformMatrix4fv(PT.uVP, false, vp);
+      }
+    }
+  }
 
   // sun core
   if (state.showSun) {
@@ -1403,8 +1429,9 @@ function render(now) {
     }
   }
 
-  // comet tails (anti-sunward) — drawn last so they layer over everything (additive)
-  if (groups[GI.COM].visible || groups[GI.LPC].visible) drawCometTails();
+  // comet tails (anti-sunward) — drawn last so they layer over everything
+  // (additive); parked at a planet they recede with the rest of the field
+  if (!state.focus && (groups[GI.COM].visible || groups[GI.LPC].visible)) drawCometTails();
 
   updateOverlays(pixScale);
   updateHUD();
@@ -1427,6 +1454,7 @@ function project(x, y, z) {
 
 /* ---- HTML overlays: sun halo, planet labels, selection marker ---- */
 let selMarkerEl = null;
+let selMarkerLastRect = null;
 // Region labels: anchored at world-space points, fading with camera distance.
 // "→ Alpha Centauri" sits along the star's TRUE J2000 direction (RA 14h39.6m,
 // Dec −60.8° rotated into the ecliptic frame) — you have to face it to see it.
@@ -1465,7 +1493,23 @@ function buildPhaList() {
   }
 }
 let phaPos = new Float32Array(0), phaPosBuf = null;
+/* screen-space label collision: first placed wins; later labels that overlap
+   an occupied rect stay hidden this frame instead of stacking */
+const placedRects = [];
+function rectFree(x, y, text) {
+  const w = text.length * 6.8 + 10;
+  const r = [x - w / 2, y - 26, x + w / 2, y - 4];
+  for (const q of placedRects) {
+    if (r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1]) return false;
+  }
+  placedRects.push(r);
+  return true;
+}
+
 function updateOverlays(pixScale) {
+  placedRects.length = 0;
+  // the selection marker always wins: reserve its footprint (from last frame)
+  if (selMarkerLastRect) placedRects.push(selMarkerLastRect);
   // sun halo (fades out once the Sun is a sub-pixel speck)
   const sp = state.showSun ? project(0, 0, 0) : null;
   if (sp) {
@@ -1486,11 +1530,13 @@ function updateOverlays(pixScale) {
   // fade out as the camera pulls past the planets — otherwise it just sits as an
   // unreadable smudge on the collapsed inner-system blob (like the planet labels do)
   const sunFade = clamp(1 - (state.cam.dist - 8) / 12, 0, 1);   // full ≤8 au, gone by ~20 au
-  const sshow = sp && sunFade > 0.02 && sp[0] > -40 && sp[0] < cssW + 40 && sp[1] > -20 && sp[1] < cssH + 20;
+  const sshow = !state.selSun && sp && sunFade > 0.02 && sp[0] > -40 && sp[0] < cssW + 40 && sp[1] > -20 && sp[1] < cssH + 20 &&
+    rectFree(sp[0], sp[1], "Sun");
   sunLabelEl.style.opacity = sshow ? sunFade.toFixed(2) : "0";
   if (sshow) sunLabelEl.style.transform = `translate(${sp[0]}px, ${sp[1]}px) translate(-50%,-150%)`;
-  // planet labels
-  for (const ps of planetState) {
+  // planet labels (the selected planet's ambient label yields to the marker)
+  for (let i = 0; i < planetState.length; i++) {
+    const ps = planetState[i];
     if (!ps.labelEl) {
       ps.labelEl = document.createElement("div");
       ps.labelEl.className = "pl-label";
@@ -1500,7 +1546,11 @@ function updateOverlays(pixScale) {
     const p = project(ps.pos[0], ps.pos[1], ps.pos[2]);
     if (!p) { ps.labelEl.style.opacity = "0"; continue; }
     const px = (pixScale / dpr) * ps.def.size / p[2];
-    const show = state.showPlanets && px > 1.6 && p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20;
+    // parked at a planet, background planet labels stand down
+    const bgMuted = state.focus && !(state.focus.planet === i);
+    const show = state.showPlanets && state.selPlanet !== i && !bgMuted && px > 1.6 &&
+      p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20 &&
+      rectFree(p[0], p[1], ps.def.name);
     ps.labelEl.style.opacity = show ? "1" : "0";
     if (show) ps.labelEl.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
   }
@@ -1515,9 +1565,12 @@ function updateOverlays(pixScale) {
       d.el.textContent = d.name;
       labelsEl.appendChild(d.el);
     }
-    if (!g.visible || dwarfFade === 0) { d.el.style.opacity = "0"; continue; }
+    const isSel = state.selected && state.selected.group === d.gi && state.selected.index === d.k;
+    const isFocusTarget = state.focus && state.focus.small && state.focus.small[0] === d.gi && state.focus.small[1] === d.k;
+    if (!g.visible || dwarfFade === 0 || isSel || (state.focus && !isFocusTarget)) { d.el.style.opacity = "0"; continue; }
     const p = project(g.pos[d.k * 3], g.pos[d.k * 3 + 1], g.pos[d.k * 3 + 2]);
-    const show = p && p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20;
+    const show = p && p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20 &&
+      rectFree(p[0], p[1], d.name);
     d.el.style.opacity = show ? (0.85 * dwarfFade).toFixed(2) : "0";
     if (show) d.el.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
   }
@@ -1538,7 +1591,8 @@ function updateOverlays(pixScale) {
       const pp = project(_mpp[0], _mpp[1], _mpp[2]);
       if (pp) sep = Math.hypot(p[0] - pp[0], p[1] - pp[1]);
     }
-    const show = sep > 30 && p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20;
+    const show = sep > 30 && state.selMoon !== ml.k && p[0] > -40 && p[0] < cssW + 40 && p[1] > -20 && p[1] < cssH + 20 &&
+      rectFree(p[0], p[1], ml.name);
     ml.el.style.opacity = show ? "0.85" : "0";
     if (show) ml.el.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
   }
@@ -1550,9 +1604,10 @@ function updateOverlays(pixScale) {
       c.labelEl.textContent = c.name;
       labelsEl.appendChild(c.labelEl);
     }
-    if (!craftVisible || !c.inRange) { c.labelEl.style.opacity = "0"; continue; }
+    if (!craftVisible || !c.inRange || (state.selCraft != null && craft[state.selCraft] === c)) { c.labelEl.style.opacity = "0"; continue; }
     const p = project(c.pos[0], c.pos[1], c.pos[2]);
-    const show = p && p[0] > -60 && p[0] < cssW + 60 && p[1] > -20 && p[1] < cssH + 20;
+    const show = p && p[0] > -60 && p[0] < cssW + 60 && p[1] > -20 && p[1] < cssH + 20 &&
+      rectFree(p[0], p[1], c.name);
     c.labelEl.style.opacity = show ? "0.9" : "0";
     if (show) c.labelEl.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
   }
@@ -1633,9 +1688,12 @@ function updateOverlays(pixScale) {
     if (p) {
       selMarkerEl.style.opacity = "1";
       selMarkerEl.style.transform = `translate(${p[0]}px, ${p[1]}px) translate(-50%,-150%)`;
-    } else selMarkerEl.style.opacity = "0";
-  } else if (selMarkerEl) {
-    selMarkerEl.style.opacity = "0";
+      const w = selName.length * 6.8 + 10;
+      selMarkerLastRect = [p[0] - w / 2, p[1] - 26, p[0] + w / 2, p[1] - 4];
+    } else { selMarkerEl.style.opacity = "0"; selMarkerLastRect = null; }
+  } else {
+    if (selMarkerEl) selMarkerEl.style.opacity = "0";
+    selMarkerLastRect = null;
   }
 }
 
@@ -1761,7 +1819,7 @@ function fetchJSON(url) {
 // dwarf planets, Sentry-listed objects, and any real imagery we have.
 function makeMeta(r, kind) {
   const m = {
-    name: r.name, cls: r.cls, a: r.a, e: r.e, i: r.inc,
+    name: r.name, pdes: r.pdes, cls: r.cls, a: r.a, e: r.e, i: r.inc,
     H: r.H, diam: r.diam, albedo: r.albedo, rot: r.rot,
     spec: r.spec || "", pha: !!r.pha, moid: r.moid,
     q: r.a * (1 - r.e), kind: kind || "a", dwarf: null, sentry: null, img: null,
@@ -2247,6 +2305,8 @@ function loaderReady() {
     loader.removeEventListener("click", launch);
     window.removeEventListener("keydown", onKey);
     loader.classList.add("done");
+    setTimeout(loadSatellites, 5000);   // pre-warm the live-satellite layer for search & Earth
+    document.body.classList.add("launched");
     if (skipDolly) {                 // arrived via a deep link — keep the restored view, no dive
       state.camEaseRate = 9;
       setTimeout(dismissHint, 6000);
@@ -2268,6 +2328,11 @@ function loaderReady() {
   loader.addEventListener("click", launch);
   window.addEventListener("keydown", onKey);
 }
+
+/* the mobile bottom sheet / FAB rail react to the info panel's visibility */
+new MutationObserver(() => {
+  document.body.classList.toggle("sheet-open", !$("panel-info").hidden);
+}).observe($("panel-info"), { attributes: true, attributeFilter: ["hidden"] });
 
 /* ---- close approaches (JPL CNEOS, from the snapshot) ---- */
 function renderCloseApproaches(resp) {
@@ -2347,7 +2412,10 @@ function evCometPerihelia(now, end) {
       if (gi === GI.COM) { const period = TWO_PI / n; peri = tp + Math.ceil((now - tp) / period) * period; }
       if (peri < now - 1 || peri > end) continue;
       const m = g.meta[k], ggi = gi, kk = k;
-      out.push({ jd: peri, kind: "com", label: m.name + " — perihelion", sub: "q " + m.q.toFixed(2) + " au",
+      // "238P/Read", not a bare "Read" that scans as a UI verb
+      const evName = m.pdes && !m.name.includes(String(m.pdes)) && /^\d+[PDI]/.test(String(m.pdes))
+        ? m.pdes + "/" + m.name : m.name;
+      out.push({ jd: peri, kind: "com", label: evName + " — perihelion", sub: "q " + m.q.toFixed(2) + " au",
         act: () => { if (!groups[ggi].visible) { groups[ggi].visible = true; renderLegend(); } selectObject(ggi, kk); jumpToJD(peri); } });
     }
   }
@@ -2402,6 +2470,7 @@ function renderEvents(snap) {
     const d = new Date((e.jd - 2440587.5) * 86400000);
     const when = `${String(d.getUTCDate()).padStart(2, "0")} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
     const li = document.createElement("li");
+    li.dataset.jd = e.jd;
     li.innerHTML = `<span class="ev-dot" style="background:${EV_DOT[e.kind]};box-shadow:0 0 7px ${EV_DOT[e.kind]}"></span>` +
       `<span class="ev-name"></span><span class="ev-sub">${e.sub}</span><span class="ev-date">${when}</span>`;
     li.querySelector(".ev-name").textContent = e.label;
@@ -2409,6 +2478,13 @@ function renderEvents(snap) {
     list.appendChild(li);
   }
 }
+/* events already behind the simulated clock gray out as "past" */
+setInterval(() => {
+  const now = state.simJD;
+  document.querySelectorAll("#events-list li[data-jd]").forEach((li) => {
+    li.classList.toggle("past", +li.dataset.jd < now - 0.5);
+  });
+}, 2500);
 
 /* ---- Sentry impact-risk watchlist (JPL CNEOS, from the snapshot) ---- */
 function buildSentryMap(sentry) {
@@ -2607,6 +2683,7 @@ function selectObject(gi, k) {
   satLayout(false);
   // selecting a small body with its own moons (Pluto) focuses the camera on it
   if (plutoRef && gi === plutoRef[0] && k === plutoRef[1]) focusOn({ small: plutoRef });
+  else flyToSmallBody(g, k);   // otherwise, always fly to frame the object
   const o = k * STRIDE, el = g.el;
   buildSelectedOrbit({
     a: el[o], e: el[o + 1], b: el[o + 2],
@@ -2680,6 +2757,24 @@ function selectObject(gi, k) {
   renderPreview(m);
   $("panel-info").hidden = false;
 }
+/* Sun-centred fly-to for a small body: swing the camera to its side of the
+   sky and frame its current solar distance so the object and its orbit
+   context land together (selection must always arrive somewhere). */
+function flyToSmallBody(g, k) {
+  if (state.focus) { state.focus = null; retarget(); }
+  const x = g.pos[k * 3], y = g.pos[k * 3 + 1], z = g.pos[k * 3 + 2];
+  const r = Math.hypot(x, y, z);
+  if (!(r > 0.05)) return;
+  const az = Math.atan2(y, x);
+  let dYaw = az - state.cam.tYaw;
+  dYaw = ((dYaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
+  state.cam.tYaw += dYaw;
+  state.cam.tPitch = clamp(0.42 + Math.atan2(z, Math.hypot(x, y)) * 0.5, -1.3, 1.3);
+  state.cam.tDist = clamp(r * 2.3, 0.6, MAX_DIST);
+  state.topDown = false;
+  $("fab-view").classList.remove("on");
+}
+
 /* Camera focus: re-target the orbit camera onto a body and pick a zoom that
    frames its moon system (major moons ≥ 400 km set the scale). */
 function retarget() {
@@ -2690,11 +2785,23 @@ function focusOn(f) {
   state.focus = f;
   retarget();
   if (f.planet === EARTH_IDX) sats.fullUpdate = true;   // force a full SGP4 pass on arrival
+  if (f.planet != null) {
+    // arrive AT the planet, Eyes-style: the lit disc (and rings/satellite
+    // shells) fills ~26% of the viewport; the moon system is a scroll away
+    const rAU = (PLANET_FACTS[f.planet].d * 0.5) / AU_KM;
+    state.cam.tDist = clamp(rAU * 14.8, 1e-4, 0.5);
+    // approach from sunward so the disc arrives lit, not as a night-side crescent
+    const pp = planetState[f.planet].pos;
+    const sunYaw = Math.atan2(-pp[1], -pp[0]);
+    let dYaw = sunYaw - state.cam.tYaw;
+    dYaw = ((dYaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
+    state.cam.tYaw += dYaw;
+    state.cam.tPitch = 0.22;
+    return;
+  }
   let aMax = 0, aAny = 0;
   for (let k = 0; k < moons.count; k++) {
-    const isChild = f.planet != null
-      ? moons.parentIdx[k] === f.planet
-      : moons.parentSmall[k] && f.small && moons.parentSmall[k][0] === f.small[0] && moons.parentSmall[k][1] === f.small[1];
+    const isChild = moons.parentSmall[k] && f.small && moons.parentSmall[k][0] === f.small[0] && moons.parentSmall[k][1] === f.small[1];
     if (!isChild) continue;
     aAny = Math.max(aAny, moons.meta[k].a);
     if (moons.meta[k].radius >= 400) aMax = Math.max(aMax, moons.meta[k].a);
@@ -2734,7 +2841,8 @@ function selectPlanet(i) {
   const el = planetElements(ps.def, state.simJD, { a: 0, e: 0, i: 0, om: 0, w: 0, M: 0 });
   $("info-a").textContent = el.a.toFixed(3) + " au";
   $("info-e").textContent = el.e.toFixed(4);
-  $("info-i").textContent = (el.i / DEG).toFixed(2) + "°";
+  const iDeg = el.i / DEG;
+  $("info-i").textContent = (Math.abs(iDeg) < 0.005 ? 0 : iDeg).toFixed(2) + "°";
   $("info-per").textContent = formatPeriod(Math.pow(el.a, 1.5));
   $("info-d-label").textContent = "diameter";
   $("info-d").textContent = facts.d.toLocaleString("en-US") + " km";
@@ -3126,7 +3234,7 @@ function formatPeriod(yr) {
   if (yr >= 1e6) return (yr / 1e6).toFixed(1) + " Myr";
   if (yr >= 1e4) return Math.round(yr / 1e3) + " kyr";
   if (yr >= 1e3) return Math.round(yr).toLocaleString("en-US") + " yr";
-  return yr < 1.5 ? Math.round(d) + " days" : yr.toFixed(yr < 10 ? 2 : 1) + " yr";
+  return yr < 1.5 ? d.toFixed(1) + " days" : yr.toFixed(yr < 10 ? 2 : 1) + " yr";
 }
 function formatKm(km) {
   return km < 1 ? Math.round(km * 1000) + " m" : km < 10 ? km.toFixed(1) + " km" : Math.round(km) + " km";
@@ -3382,49 +3490,68 @@ function pickAt(x, y) {
 /* ---- search ---- */
 const searchEl = $("search");
 const resultsEl = $("search-results");
+/* rank: exact name > starts-with > word-start > substring, so "iss" finds
+   the ISS before it finds Lar-iss-a; ties keep category order */
+function matchScore(name, q) {
+  const n = name.toLowerCase();
+  if (n === q) return 0;
+  if (n.startsWith(q)) return 1;
+  const w = n.indexOf(q);
+  if (w < 0) return Infinity;
+  const prev = n[w - 1];
+  return prev === " " || prev === "(" || prev === "/" || prev === "-" ? 2 : 3;
+}
 function runSearch(q) {
   q = q.trim().toLowerCase();
   resultsEl.innerHTML = "";
   if (q.length < 2) { resultsEl.hidden = true; return; }
-  const hits = [];   // { name, cls, select }
-  // the Sun, planets and moons first — exact-prefix matches are what people want
-  if ("sun".includes(q)) hits.push({ name: "Sun", cls: "STAR", select: selectSun });
+  if (!sats.loaded) loadSatellites();   // so live satellites are findable
+  const hits = [];   // { name, cls, select, s, ord }
+  let ord = 0;
+  const add = (name, matchName, cls, select) => {
+    const s = matchScore(matchName, q);
+    if (s < Infinity) hits.push({ name, cls, select, s, ord: ord++ });
+  };
+  add("Sun", "sun", "STAR", selectSun);
   for (let i = 0; i < PLANETS.length; i++) {
-    if (PLANETS[i].name.toLowerCase().includes(q)) {
-      hits.push({ name: PLANETS[i].name, cls: "PLANET", select: () => selectPlanet(i) });
-    }
+    const ii = i;
+    add(PLANETS[i].name, PLANETS[i].name, "PLANET", () => selectPlanet(ii));
   }
-  for (let k = 0; k < moons.count && hits.length < 6; k++) {
-    if (moons.meta[k].name.toLowerCase().includes(q)) {
+  let taken = 0;
+  for (let k = 0; k < moons.count && taken < 14; k++) {
+    if (matchScore(moons.meta[k].name, q) < Infinity) {
       const kk = k;
-      hits.push({ name: moons.meta[k].name + " · " + moons.meta[k].parentName, cls: "MOON", select: () => selectMoon(kk) });
+      add(moons.meta[k].name + " · " + moons.meta[k].parentName, moons.meta[k].name, "MOON", () => selectMoon(kk));
+      taken++;
     }
   }
   for (let i = 0; i < craft.length; i++) {
-    if (craft[i].name.toLowerCase().includes(q)) {
-      const ii = i;
-      hits.push({ name: craft[i].name, cls: "CRAFT", select: () => selectCraft(ii) });
-    }
+    const ii = i;
+    add(craft[i].name, craft[i].name, "CRAFT", () => selectCraft(ii));
   }
   if (sats.loaded) {
-    for (let k = 0; k < sats.count && hits.length < 7; k++) {
-      if (sats.names[k].toLowerCase().includes(q)) {
+    taken = 0;
+    for (let k = 0; k < sats.count && taken < 12; k++) {
+      if (matchScore(sats.names[k], q) < Infinity) {
         const kk = k;
-        hits.push({ name: sats.names[k], cls: "SAT", select: () => { focusOn({ planet: EARTH_IDX }); selectSatellite(kk); } });
+        add(sats.names[k], sats.names[k], "SAT", () => { selectPlanet(EARTH_IDX); selectSatellite(kk); });
+        taken++;
       }
     }
   }
+  taken = 0;
   outer:
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi];
     for (let k = 0; k < g.count; k++) {
-      if (g.meta[k].name.toLowerCase().includes(q)) {
+      if (matchScore(g.meta[k].name, q) < Infinity) {
         const ggi = gi, kk = k;
-        hits.push({ name: g.meta[k].name, cls: g.meta[k].cls, select: () => selectObject(ggi, kk) });
-        if (hits.length >= 8) break outer;
+        add(g.meta[k].name, g.meta[k].name, g.meta[k].cls, () => selectObject(ggi, kk));
+        if (++taken >= 30) break outer;
       }
     }
   }
+  hits.sort((a, b) => a.s - b.s || a.ord - b.ord);
   if (!hits.length) { resultsEl.hidden = true; return; }
   for (const h of hits.slice(0, 8)) {
     const li = document.createElement("li");
@@ -3561,7 +3688,8 @@ $("btn-now").addEventListener("click", () => {
 $("speed-chips").addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-dps]");
   if (!b) return;
-  state.dps = +b.dataset.dps;
+  state.dps = b.dataset.dps === "real" ? 1 / 86400 : +b.dataset.dps;
+  if (b.dataset.dps === "real") { state.simJD = jdNow(); state.needFullUpdate = true; }  // "live" snaps back to the actual present
   if (!state.playing) { state.playing = true; syncPlayBtn(); }
   for (const x of $("speed-chips").children) x.classList.toggle("on", x === b);
 });
@@ -3671,6 +3799,8 @@ function togglePanel(id, fab) {
   if (fab) fab.classList.toggle("on", !isOpen);
 }
 $("fab-legend").addEventListener("click", (ev) => togglePanel("panel-legend", ev.currentTarget));
+// the legend ships open on desktop so the color code is always explained
+if (window.matchMedia && window.matchMedia("(min-width: 861px)").matches) $("fab-legend").classList.add("on");
 $("fab-cad").addEventListener("click", (ev) => togglePanel("panel-cad", ev.currentTarget));
 $("fab-sentry").addEventListener("click", (ev) => togglePanel("panel-sentry", ev.currentTarget));
 $("fab-events").addEventListener("click", (ev) => togglePanel("panel-events", ev.currentTarget));

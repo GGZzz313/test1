@@ -89,7 +89,7 @@
 </div>
 
 <!-- ======================= Legend / filters ======================= -->
-<aside id="panel-legend" class="panel closed">
+<aside id="panel-legend" class="panel">
   <div class="panel-head"><h2>Populations</h2><button class="panel-close" data-close="panel-legend" aria-label="Close">✕</button></div>
   <ul id="legend-list"></ul>
   <div class="panel-foot">tap a population to show / hide it · ⓘ for what it means</div>
@@ -179,9 +179,10 @@
       <button id="btn-rev" class="tbtn" title="Reverse time" aria-label="Reverse time">⏴</button>
       <button id="btn-play" class="tbtn tbtn-main" title="Play / pause" aria-label="Play or pause">❚❚</button>
       <div class="speed-chips" id="speed-chips" title="Simulation speed — sim time elapsed per real second">
+        <button data-dps="real" class="on">live</button>
         <button data-dps="1">1 d/s</button>
         <button data-dps="7">1 wk/s</button>
-        <button data-dps="30" class="on">1 mo/s</button>
+        <button data-dps="30">1 mo/s</button>
         <button data-dps="182">6 mo/s</button>
         <button data-dps="1826">5 yr/s</button>
       </div>
